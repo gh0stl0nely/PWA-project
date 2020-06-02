@@ -4,7 +4,9 @@ var FILE_TO_CACHE = [
     "/styles.css",
     "/index.js",
     "/icons/icon-192x192.png",
-    "/icons/icon-512x512.png"
+    "/icons/icon-512x512.png",
+    "https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css",
+    "https://cdn.jsdelivr.net/npm/chart.js@2.8.0"
 ];
 
 var cacheName = "myCache";
@@ -36,32 +38,29 @@ self.addEventListener('fetch', function (evt) {
 
     // We are offline
     if (!navigator.onLine) {
-        if (evt.request.url.includes("/api/")) {
-            evt.respondWith(
-                caches.open(dataCache).then(cache => {
-                    return fetch(evt.request)
-                        .then(response => {
-                            // If the response was good, clone it and store it in the cache.
-                            if (response.status === 200) {
-                                cache.put(evt.request.url, response.clone());
-                            }
-
-                            return response;
-                        })
-                        .catch(err => {
-                            // Network request failed, try to get it from the cache.
-                            return cache.match(evt.request);
-                        });
-                }).catch(err => console.log(err))
-            );
-
-            return;
+        // If we get a post request for information!
+        if (evt.request.method == "POST") {
+            evt.request.json().then(res => {
+                const request = self.indexedDB.open("My Transaction Database");
+                request.onsuccess = function(e){
+                    const db = request.result;
+                    const tx = db.transaction("transactions", "readwrite");
+                    const objectStore = tx.objectStore("transactions");
+                    const addToDBRequest = objectStore.add(res);
+    
+                    addToDBRequest.onsuccess = function(){
+                        console.log("Added to Indxed DB successfully");
+                        return;
+                    }
+                }
+            });
         }
 
-        // This is if we are not using API (request)
-
+        // This is if we are not using API (request) then we only need to serve static files
+        console.log("Serving static files from cache");
         evt.respondWith(
             caches.match(evt.request).then(function (response) {
+                console.log(evt.request);
                 return response || fetch(evt.request);
             })
         );
@@ -87,38 +86,13 @@ function initializeIndexedDB() {
             keyPath: 'id',
             autoIncrement: true
         });
-
-        // OPen an transaction
-        var tx = event.target.transaction;
-
-        tx.onsuccess = function (event) {
-            console.log('[Transaction] ALL DONE!');
-        };
-
-        // Select the write store for transaction
-        var selectedStore = tx.objectStore("transactions");
-
-        for (var i = 0; i < 3; i++) {
-            var addReq = selectedStore.add({
-                "name": "Khoi",
-                "value": 1,
-                "date": Date.now()
-            });
-        }
-
-        // var req = selectedStore.getAll();
-        // req.onsuccess = function (e) {
-        //     console.log(req.result);
-        // }
-        // Now we get it to display, now just need to find out 1) How to get it from offline mode
-        // 2) Give it back when go back online
     };
 }
 
 function processIndexedDBData() {
     const request = self.indexedDB.open("My Transaction Database");
     request.onsuccess = function (e) {
-        // Succesffuly opened, now grab data in there and console log it 
+        // Succesfully opened, now grab data from there and console log it 
         const db = request.result;
         const tx = db.transaction("transactions", "readwrite");
         const objectStore = tx.objectStore("transactions");
@@ -127,14 +101,29 @@ function processIndexedDBData() {
 
         req.onsuccess = async function (e) {
             let offlineData = req.result;
-            const response = await fetch("/api/transaction/bulk", {
-                method: "POST",
-                body: JSON.stringify(offlineData),
-                headers: {
-                  Accept: "application/json, text/plain, */*",
-                  "Content-Type": "application/json"
+
+            if(offlineData){
+                // If there is nothing in offlineData then we don't need to do anything
+                const response = await fetch("/api/transaction/bulk", {
+                    method: "POST",
+                    body: JSON.stringify(offlineData),
+                    headers: {
+                      Accept: "application/json, text/plain, */*",
+                      "Content-Type": "application/json"
+                    }
+                });
+
+                // At this point, we need to open a second transaction in order to delete all offline data
+                const tx2 = db.transaction("transactions", "readwrite");
+                const sameObjectStore = tx2.objectStore("transactions");
+                // Now delete all the data in IndexedDB :) 
+                const deleteRequest = sameObjectStore.clear();
+
+                deleteRequest.onsuccess = function(e){
+                    console.log("Finished deleting all in IndexedDB");
                 }
-              });
+            }
+          
         }
 
     };
